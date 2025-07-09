@@ -5,8 +5,11 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
+    MessageHandler,
+    filters
 )
 from io import StringIO
+
 
 questions = [
     {
@@ -268,8 +271,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data[user_id] = {
         "score": 0,
         "current_q": 0,
-        "answers": []
+        "answers": [],
+        "name": ""
     }
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Привіт!Напиши ,будь ласка, своє ім'я та прізвище?"
+    )
+    return
+
+async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in user_data:
+        await update.message.reply_text("Спочатку напишіть /start")
+        return
+
+    name = update.message.text.strip()
+    user_data[user_id]["name"] = name
+
+    await update.message.reply_text(
+        f"Радий знайомству, {name}! 🖐️\n\n"
+        "Вас чекає тест зі словацької мови. У кожному запитанні буде один правильний варіант відповіді.\n"
+        "Обирайте варіант, натискаючи на кнопки під запитанням.\n\n"
+        "Успіхів!"
+    )
+
     await send_question(update, context)
 
 
@@ -278,6 +304,7 @@ async def send_question(update_or_callback, context):
     current_q = user_data[user_id]["current_q"]
 
     if current_q < len(questions):
+    #if current_q < 2:
         q = questions[current_q]
         buttons = [
             [InlineKeyboardButton(text=opt[0], callback_data=opt[1])]
@@ -293,16 +320,86 @@ async def send_question(update_or_callback, context):
         await finish_test(update_or_callback, context)
 
 def evaluate_level(score, total):
-    pass
+    percent = score / total
+    if percent == 1:
+        return "C1–C2 (вільне володіння)\nРекомендований курс: Advanced або SpeakingClub\nДля запису на курси напишіть менеджерці Ірині:\n@iireeennn"
+    elif percent >= 0.7:
+        return "B1–B2 (середній рівень)\nРекомендований курс: Intermediate\nДля запису на курси напишіть менеджерці Ірині:\n@iireeennn"
+    elif percent >= 0.4:
+        return "A2 (початковий рівень)\nРекомендований курс: Beginner\nДля запису на курси напишіть менеджерці Ірині:\n@iireeennn"
+    else:
+        return "A1 (базовий рівень)\nРекомендований курс: Beginner\nДля запису на курси напишіть менеджерці Ірині:\n@iireeennn"
 
 async def handle_answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pass
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    current_q = user_data[user_id]["current_q"]
+    selected = query.data
+    correct = questions[current_q]["answer"]
+
+    user_data[user_id]["answers"].append({
+        "question": questions[current_q]["question"],
+        "selected": selected,
+        "correct": correct
+    })
+
+    if selected == correct:
+        user_data[user_id]["score"] += 1
+
+    user_data[user_id]["current_q"] += 1
+    await send_question(update, context)
 
 
 async def finish_test(update, context):
-    pass
+    user_id = update.effective_user.id
+    score = user_data[user_id]["score"]
+    total = len(questions)
+    level = evaluate_level(score, total)
+    name = user_data[user_id]["name"]
+
+    log = StringIO()
+    writer = csv.writer(log)
+    writer.writerow(["Запитання", "Ваша відповідь", "Правильна відповідь", "Правильно?"])
+
+    for ans in user_data[user_id]["answers"]:
+        writer.writerow([
+            ans["question"],
+            ans["selected"],
+            ans["correct"],
+            "Так" if ans["selected"] == ans["correct"] else "Ні"
+        ])
+    log.seek(0)
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Тест завершено!\n📊 Результат: {score}/{total}\n🏷️ Рівень: {level}"
+    )
+    await context.bot.send_document(
+        chat_id=update.effective_chat.id,
+        document=InputFile(log, filename="results.csv"),
+        caption="Ось файл з правильними відповідями:"
+    )
+
+    log.seek(0)
+    await context.bot.send_message(
+        chat_id= "YOUR_ID",
+        text=f"🧑 Ім'я: {name}\n📊 Результат: {score}/{total}\n🏷️ Рівень: {level}"
+    )
+    await context.bot.send_document(
+        chat_id="YOUR_ID",
+        document=InputFile(log, filename=f"{name}_results.csv"),
+        caption=f"Результати тесту від {name}"
+    )
 
 
 if __name__ == '__main__':
-    print("Bot is running...")
+    app = ApplicationBuilder().token("TOKEN_NUM").build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_name))
+
+    app.add_handler(CallbackQueryHandler(handle_answer_callback))
+
+    app.run_polling()
 
