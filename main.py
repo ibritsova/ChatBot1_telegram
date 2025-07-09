@@ -264,11 +264,33 @@ questions = [
 user_data = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pass
+    user_id = update.effective_user.id
+    user_data[user_id] = {
+        "score": 0,
+        "current_q": 0,
+        "answers": []
+    }
+    await send_question(update, context)
 
 
 async def send_question(update_or_callback, context):
-    pass
+    user_id = update_or_callback.effective_user.id
+    current_q = user_data[user_id]["current_q"]
+
+    if current_q < len(questions):
+        q = questions[current_q]
+        buttons = [
+            [InlineKeyboardButton(text=opt[0], callback_data=opt[1])]
+            for opt in q["options"]
+        ]
+        markup = InlineKeyboardMarkup(buttons)
+        await context.bot.send_message(
+            chat_id=update_or_callback.effective_chat.id,
+            text=f"{current_q + 1}. {q['question']}",
+            reply_markup=markup
+        )
+    else:
+        await finish_test(update_or_callback, context)
 
 def evaluate_level(score, total):
     pass
